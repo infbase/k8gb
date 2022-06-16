@@ -394,6 +394,39 @@ func TestDNSRecordReflectionInStatus(t *testing.T) {
 	assert.Equal(t, got, want, "got:\n %s healthyRecordsMetric status,\n\n want:\n %s", got, want)
 }
 
+func TestStrategyWeight(t *testing.T) {
+	// arrange
+	serviceName := defaultPodinfoServiceName
+	dnsEndpoint := &externaldns.DNSEndpoint{}
+	want := map[string][]string{"roundrobin.cloud.example.com": {"10.0.0.1", "10.0.0.2", "10.0.0.3"}}
+	ingressIPs := []corev1.LoadBalancerIngress{
+		{IP: "10.0.0.1"},
+		{IP: "10.0.0.2"},
+		{IP: "10.0.0.3"},
+	}
+	settings := provideSettings(t, predefinedConfig)
+	err := settings.client.Get(context.TODO(), settings.request.NamespacedName, settings.ingress)
+	require.NoError(t, err, "Failed to get expected ingress")
+	settings.ingress.Status.LoadBalancer.Ingress = append(settings.ingress.Status.LoadBalancer.Ingress, ingressIPs...)
+	err = settings.client.Status().Update(context.TODO(), settings.ingress)
+	require.NoError(t, err, "Failed to update gslb Ingress Address")
+	settings.gslb.Spec.Strategy.Weight = make(map[string]k8gbv1beta1.Percentage)
+	settings.gslb.Spec.Strategy.Weight["eu"] = "25%"
+	settings.gslb.Spec.Strategy.Weight["us"] = "60%"
+	settings.gslb.Spec.Strategy.Weight["za"] = "15%"
+
+	// act
+	createHealthyService(t, &settings, serviceName)
+	defer deleteHealthyService(t, &settings, serviceName)
+	reconcileAndUpdateGslb(t, settings)
+	err = settings.client.Get(context.TODO(), settings.request.NamespacedName, dnsEndpoint)
+	require.NoError(t, err, "Failed to load DNS endpoint")
+	got := settings.gslb.Status.HealthyRecords
+
+	// assert
+	assert.Equal(t, got, want, "got:\n %s healthyRecordsMetric status,\n\n want:\n %s", got, want)
+}
+
 func TestLocalDNSRecordsHasSpecialAnnotation(t *testing.T) {
 	// arrange
 	serviceName := defaultPodinfoServiceName
