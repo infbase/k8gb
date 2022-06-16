@@ -297,7 +297,7 @@ func dnsQuery(host string, nameservers utils.DNSList) (*dns.Msg, error) {
 }
 
 func (r *Gslb) GetExternalTargets(host string, extClusterNsNames map[string]string) (targets Targets) {
-	targets = Targets{}
+	targets = NewTargets()
 	for _, cluster := range extClusterNsNames {
 		// Use edgeDNSServer for resolution of NS names and fallback to local nameservers
 		log.Info().
@@ -327,7 +327,7 @@ func (r *Gslb) GetExternalTargets(host string, extClusterNsNames map[string]stri
 		}
 		clusterTargets := getARecords(a)
 		if len(clusterTargets) > 0 {
-			targets = append(targets, Target{cluster, clusterTargets})
+			targets[cluster] = Target{clusterTargets}
 			log.Info().
 				Strs("clusterTargets", clusterTargets).
 				Str("cluster", cluster).
