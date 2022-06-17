@@ -182,9 +182,9 @@ func (r *GslbReconciler) updateRuntimeStatus(gslb *k8gbv1beta1.Gslb, isPrimary b
 // otherwise returns empty annotations
 func (r *GslbReconciler) getLocalTargetAnnotations(gslb *k8gbv1beta1.Gslb, targets assistant.Targets) (annotations map[string]string, err error) {
 	type wrr struct {
-		region  string
-		weight  int
-		targets []string
+		Region  string   `json:"region"`
+		Weight  int      `json:"weight"`
+		Targets []string `json:"targets"`
 	}
 	const rrAnnotation = "k8gb.absa.oss/weight-round-robin"
 
@@ -195,7 +195,7 @@ func (r *GslbReconciler) getLocalTargetAnnotations(gslb *k8gbv1beta1.Gslb, targe
 		var wrri []wrr
 
 		for k, v := range gslb.Spec.Strategy.Weight {
-			wrri = append(wrri, wrr{region: k, weight: v.Int(), targets: targets[k].IPs})
+			wrri = append(wrri, wrr{Region: k, Weight: v.Int(), Targets: targets[k].IPs})
 		}
 
 		bytes, err = json.Marshal(wrri)
