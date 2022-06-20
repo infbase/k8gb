@@ -24,12 +24,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/k8gb-io/k8gb/controllers/providers/assistant"
-
 	"github.com/k8gb-io/k8gb/controllers/depresolver"
+	"github.com/k8gb-io/k8gb/controllers/providers/assistant"
 
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	externaldns "sigs.k8s.io/external-dns/endpoint"
 )
 
@@ -160,10 +160,10 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 		Spec: dnsEndpointSpec,
 	}
 
-	//err = controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme)
-	//if err != nil {
-	//	return nil, err
-	//}
+	err = controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme)
+	if err != nil {
+		return nil, err
+	}
 	return dnsEndpoint, err
 }
 
