@@ -236,109 +236,16 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return nil
 		})
 
-	createGslbFromIngress := func(annotationKey string, annotationValue string, a client.Object, strategy string) {
-		log.Info().
-			Str("annotation", fmt.Sprintf("(%s:%s)", annotationKey, annotationValue)).
-			Str("ingress", a.GetName()).
-			Msg("Detected strategy annotation on ingress")
-		c := mgr.GetClient()
-		ingressToReuse := &netv1.Ingress{}
-		err := c.Get(context.Background(), client.ObjectKey{
-			Namespace: a.GetNamespace(),
-			Name:      a.GetName(),
-		}, ingressToReuse)
-		if err != nil {
-			log.Info().
-				Str("ingress", a.GetName()).
-				Msg("Ingress does not exist anymore. Skipping Glsb creation...")
-			return
-		}
-		gslbExist := &k8gbv1beta1.Gslb{}
-		err = c.Get(context.Background(), client.ObjectKey{
-			Namespace: a.GetNamespace(),
-			Name:      a.GetName(),
-		}, gslbExist)
-		if err == nil {
-			log.Info().
-				Str("gslb", gslbExist.Name).
-				Msg("Gslb already exists. Skipping Gslb creation...")
-			return
-		}
-		gslb := &k8gbv1beta1.Gslb{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   a.GetNamespace(),
-				Name:        a.GetName(),
-				Annotations: a.GetAnnotations(),
-			},
-			Spec: k8gbv1beta1.GslbSpec{
-				Ingress: k8gbv1beta1.FromV1IngressSpec(ingressToReuse.Spec),
-				Strategy: k8gbv1beta1.Strategy{
-					Type: strategy,
-				},
-			},
-		}
-
-		annotationToInt := func(k string, v string) int {
-			intValue, err := strconv.Atoi(v)
-			if err != nil {
-				log.Err(err).
-					Str("annotationKey", k).
-					Str("annotationValue", v).
-					Msg("Can't parse annotation value to int")
-			}
-			return intValue
-		}
-
-		for annotationKey, annotationValue := range a.GetAnnotations() {
-			switch annotationKey {
-			case dnsTTLSecondsAnnotation:
-				gslb.Spec.Strategy.DNSTtlSeconds = annotationToInt(annotationKey, annotationValue)
-			case splitBrainThresholdSecondsAnnotation:
-				gslb.Spec.Strategy.SplitBrainThresholdSeconds = annotationToInt(annotationKey, annotationValue)
-			}
-		}
-
-		if strategy == depresolver.FailoverStrategy {
-			for annotationKey, annotationValue := range a.GetAnnotations() {
-				if annotationKey == primaryGeoTagAnnotation {
-					gslb.Spec.Strategy.PrimaryGeoTag = annotationValue
-				}
-			}
-			if gslb.Spec.Strategy.PrimaryGeoTag == "" {
-				log.Info().
-					Str("annotation", primaryGeoTagAnnotation).
-					Str("gslb", gslb.Name).
-					Msg("Annotation is missing, skipping Gslb creation...")
-				return
-			}
-		}
-
-		err = controllerutil.SetControllerReference(ingressToReuse, gslb, r.Scheme)
-		if err != nil {
-			log.Err(err).
-				Str("ingress", ingressToReuse.Name).
-				Str("gslb", gslb.Name).
-				Msg("Cannot set the Ingress as the owner of the Gslb")
-		}
-
-		log.Info().
-			Str("gslb", gslb.Name).
-			Msg("Creating new Gslb out of Ingress annotation")
-		err = c.Create(context.Background(), gslb)
-		if err != nil {
-			log.Err(err).Msg("Glsb creation failed")
-		}
-	}
-
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
+			c := mgr.GetClient()
 			for annotationKey, annotationValue := range a.GetAnnotations() {
 				if annotationKey == strategyAnnotation {
 					switch annotationValue {
 					case depresolver.RoundRobinStrategy:
-						createGslbFromIngress(annotationKey, annotationValue, a, depresolver.RoundRobinStrategy)
+						r.createGSLBFromIngress(c, annotationKey, annotationValue, a, depresolver.RoundRobinStrategy)
 					case depresolver.FailoverStrategy:
-						createGslbFromIngress(annotationKey, annotationValue, a, depresolver.FailoverStrategy)
+						r.createGSLBFromIngress(c, annotationKey, annotationValue, a, depresolver.FailoverStrategy)
 					}
 				}
 			}
@@ -352,4 +259,101 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&source.Kind{Type: &corev1.Endpoints{}}, endpointMapHandler).
 		Watches(&source.Kind{Type: &netv1.Ingress{}}, ingressMapHandler).
 		Complete(r)
+}
+
+func (r *GslbReconciler) createGSLBFromIngress(c client.Client, annotationKey string, annotationValue string, a client.Object, strategy string) {
+	log.Info().
+		Str("annotation", fmt.Sprintf("(%s:%s)", annotationKey, annotationValue)).
+		Str("ingress", a.GetName()).
+		Msg("Detected strategy annotation on ingress")
+	ingressToReuse := &netv1.Ingress{}
+	err := c.Get(context.Background(), client.ObjectKey{
+		Namespace: a.GetNamespace(),
+		Name:      a.GetName(),
+	}, ingressToReuse)
+	if err != nil {
+		log.Info().
+			Str("ingress", a.GetName()).
+			Msg("Ingress does not exist anymore. Skipping Glsb creation...")
+		return
+	}
+	gslbExist := &k8gbv1beta1.Gslb{}
+	gslbExistErr := c.Get(context.Background(), client.ObjectKey{
+		Namespace: a.GetNamespace(),
+		Name:      a.GetName(),
+	}, gslbExist)
+
+	gslbEmpty := &k8gbv1beta1.Gslb{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   a.GetNamespace(),
+			Name:        a.GetName(),
+			Annotations: a.GetAnnotations(),
+		},
+		Spec: k8gbv1beta1.GslbSpec{
+			Ingress: k8gbv1beta1.FromV1IngressSpec(ingressToReuse.Spec),
+			Strategy: k8gbv1beta1.Strategy{
+				Type: strategy,
+			},
+		},
+	}
+
+	annotationToInt := func(k string, v string) int {
+		intValue, err := strconv.Atoi(v)
+		if err != nil {
+			log.Err(err).
+				Str("annotationKey", k).
+				Str("annotationValue", v).
+				Msg("Can't parse annotation value to int")
+		}
+		return intValue
+	}
+
+	for annotationKey, annotationValue := range a.GetAnnotations() {
+		switch annotationKey {
+		case dnsTTLSecondsAnnotation:
+			gslbEmpty.Spec.Strategy.DNSTtlSeconds = annotationToInt(annotationKey, annotationValue)
+		case splitBrainThresholdSecondsAnnotation:
+			gslbEmpty.Spec.Strategy.SplitBrainThresholdSeconds = annotationToInt(annotationKey, annotationValue)
+		}
+	}
+
+	if strategy == depresolver.FailoverStrategy {
+		for annotationKey, annotationValue := range a.GetAnnotations() {
+			if annotationKey == primaryGeoTagAnnotation {
+				gslbEmpty.Spec.Strategy.PrimaryGeoTag = annotationValue
+			}
+		}
+		if gslbEmpty.Spec.Strategy.PrimaryGeoTag == "" {
+			log.Info().
+				Str("annotation", primaryGeoTagAnnotation).
+				Str("gslb", gslbEmpty.Name).
+				Msg("Annotation is missing, skipping Gslb creation...")
+			return
+		}
+	}
+
+	err = controllerutil.SetControllerReference(ingressToReuse, gslbEmpty, r.Scheme)
+	if err != nil {
+		log.Err(err).
+			Str("ingress", ingressToReuse.Name).
+			Str("gslb", gslbEmpty.Name).
+			Msg("Cannot set the Ingress as the owner of the Gslb")
+	}
+
+	log.Info().
+		Str("gslb", gslbEmpty.Name).
+		Msg("Creating new Gslb out of Ingress annotation")
+	if errors.IsNotFound(gslbExistErr) {
+		err = c.Create(context.Background(), gslbEmpty)
+		if err != nil {
+			log.Err(err).Msg("Glsb creation failed")
+		}
+	} else {
+		gslbExist.Annotations = a.GetAnnotations()
+		gslbExist.Spec = gslbEmpty.Spec
+		err = c.Update(context.Background(), gslbExist)
+		if err != nil {
+			log.Err(err).Msg("Glsb update failed")
+		}
+	}
 }
