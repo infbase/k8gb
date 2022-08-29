@@ -238,16 +238,10 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
-			c := mgr.GetClient()
-			for annotationKey, annotationValue := range a.GetAnnotations() {
-				if annotationKey == strategyAnnotation {
-					switch annotationValue {
-					case depresolver.RoundRobinStrategy:
-						r.createGSLBFromIngress(c, annotationKey, annotationValue, a, depresolver.RoundRobinStrategy)
-					case depresolver.FailoverStrategy:
-						r.createGSLBFromIngress(c, annotationKey, annotationValue, a, depresolver.FailoverStrategy)
-					}
-				}
+			annotations := a.GetAnnotations()
+			if annotationValue, found := annotations[strategyAnnotation]; found {
+				c := mgr.GetClient()
+				r.createGSLBFromIngress(c, a, strategyAnnotation, annotationValue)
 			}
 			return nil
 		})
@@ -261,9 +255,9 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *GslbReconciler) createGSLBFromIngress(c client.Client, annotationKey string, annotationValue string, a client.Object, strategy string) {
+func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object, annotationKey, strategy string) {
 	log.Info().
-		Str("annotation", fmt.Sprintf("(%s:%s)", annotationKey, annotationValue)).
+		Str("annotation", fmt.Sprintf("(%s:%s)", annotationKey, strategy)).
 		Str("ingress", a.GetName()).
 		Msg("Detected strategy annotation on ingress")
 	ingressToReuse := &netv1.Ingress{}
