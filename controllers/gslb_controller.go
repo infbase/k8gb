@@ -97,6 +97,7 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		m.IncrementError(gslb)
 		return result.RequeueError(fmt.Errorf("resolving spec (%s)", err))
 	}
+	log.Info().Msgf("XXXXX DepResolver %s %v", gslb.Name, gslb.Spec.Strategy)
 	log.Debug().
 		Str("gslb", gslb.Name).
 		Interface("strategy", gslb.Spec.Strategy).
@@ -239,6 +240,7 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
 			annotations := a.GetAnnotations()
+			log.Info().Msgf("XXXXX INGRES %s %v", a.GetName(), annotations)
 			if annotationValue, found := annotations[strategyAnnotation]; found {
 				c := mgr.GetClient()
 				r.createGSLBFromIngress(c, a, strategyAnnotation, annotationValue)
@@ -256,7 +258,7 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object, annotationKey, strategy string) {
-	log.Info().
+	log.Debug().
 		Str("annotation", fmt.Sprintf("(%s:%s)", annotationKey, strategy)).
 		Str("ingress", a.GetName()).
 		Msg("Detected strategy annotation on ingress")
@@ -271,11 +273,11 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 			Msg("Ingress does not exist anymore. Skipping Glsb creation...")
 		return
 	}
-	gslbExist := &k8gbv1beta1.Gslb{}
+	gslbExisting := &k8gbv1beta1.Gslb{}
 	gslbExistErr := c.Get(context.Background(), client.ObjectKey{
 		Namespace: a.GetNamespace(),
 		Name:      a.GetName(),
-	}, gslbExist)
+	}, gslbExisting)
 
 	gslbEmpty := &k8gbv1beta1.Gslb{
 		ObjectMeta: metav1.ObjectMeta{
@@ -290,7 +292,7 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 			},
 		},
 	}
-
+	log.Info().Msgf("XXXXX GSLBEmpty1 %s %v", gslbEmpty.Name, gslbEmpty.Spec.Strategy)
 	annotationToInt := func(k string, v string) int {
 		intValue, err := strconv.Atoi(v)
 		if err != nil {
@@ -302,6 +304,7 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 		return intValue
 	}
 
+	log.Info().Msgf("XXXXX ANNOTATIONS: %v", a.GetAnnotations())
 	for annotationKey, annotationValue := range a.GetAnnotations() {
 		switch annotationKey {
 		case dnsTTLSecondsAnnotation:
@@ -310,7 +313,7 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 			gslbEmpty.Spec.Strategy.SplitBrainThresholdSeconds = annotationToInt(annotationKey, annotationValue)
 		}
 	}
-
+	log.Info().Msgf("XXXXX GSLBEmpty2 %s %v, ANNOTATIONS: %v", gslbEmpty.Name, gslbEmpty.Spec.Strategy, a)
 	if strategy == depresolver.FailoverStrategy {
 		for annotationKey, annotationValue := range a.GetAnnotations() {
 			if annotationKey == primaryGeoTagAnnotation {
@@ -325,7 +328,7 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 			return
 		}
 	}
-
+	log.Info().Msgf("XXXXX GSLBEmpty3 %s %v", gslbEmpty.Name, gslbEmpty.Spec.Strategy)
 	err = controllerutil.SetControllerReference(ingressToReuse, gslbEmpty, r.Scheme)
 	if err != nil {
 		log.Err(err).
@@ -336,18 +339,23 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 
 	log.Info().
 		Str("gslb", gslbEmpty.Name).
-		Msg("Creating new Gslb out of Ingress annotation")
+		Msg("XXXXX Creating new Gslb out of Ingress annotation")
 	if errors.IsNotFound(gslbExistErr) {
 		err = c.Create(context.Background(), gslbEmpty)
 		if err != nil {
-			log.Err(err).Msg("Glsb creation failed")
+			log.Err(err).Msg("XXXXX Glsb creation failed")
 		}
 	} else {
-		gslbExist.Annotations = a.GetAnnotations()
-		gslbExist.Spec = gslbEmpty.Spec
-		err = c.Update(context.Background(), gslbExist)
+		log.Info().Msgf("XXXXX Glsb update0: %s %v", gslbExisting.Name, gslbExisting.Spec)
+		annotations := a.GetAnnotations()
+		delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
+		gslbExisting.Annotations = annotations
+		gslbExisting.Spec = gslbEmpty.Spec
+		log.Info().Msgf("XXXXX Glsb update1: %s %v", gslbExisting.Name, gslbExisting.Spec)
+		err = c.Update(context.Background(), gslbExisting)
 		if err != nil {
-			log.Err(err).Msg("Glsb update failed")
+			log.Err(err).Msg("XXXXX Glsb update failed")
 		}
 	}
+	log.Info().Msgf("XXXXX GSLBExists %s %v", gslbExisting.Name, gslbExisting.Spec.Strategy)
 }
