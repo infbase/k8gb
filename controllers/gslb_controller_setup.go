@@ -118,6 +118,15 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 		Name:      a.GetName(),
 	}, gslbExist)
 	if err == nil {
+		r.syncIngressToGslb(ingressToReuse, gslbExist)
+		err = r.Update(context.TODO(), ingressToReuse)
+		if err != nil {
+			log.Err(err).Str("ingress", a.GetName()).Msg("Updating ingress")
+		}
+		err = r.Update(context.TODO(), gslbExist)
+		if err != nil {
+			log.Err(err).Str("ingress", a.GetName()).Msg("Updating ingress")
+		}
 		log.Info().
 			Str("gslb", gslbExist.Name).
 			Msg("Gslb already exists. Skipping Gslb creation...")
@@ -194,4 +203,39 @@ func (r *GslbReconciler) parseStrategy(annotations map[string]string, strategy s
 	}
 
 	return result, nil
+}
+
+// syncIngressToGslb copies the specified entries from the ingress to the GSLB
+func (r *GslbReconciler) syncIngressToGslb(ing *netv1.Ingress, gslb *k8gbv1beta1.Gslb) {
+	// todo: replace to generics when bump GO version
+	mergeMaps := func(source, destination map[string]string) {
+		const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
+		for k, sv := range source {
+			// skip if
+			// skip kubectl.kubernetes.io/last-applied-configuration
+			if k == lastApplied {
+				continue
+			}
+			destination[k] = sv
+		}
+	}
+	// labels
+	mergeMaps(ing.Annotations, gslb.Annotations)
+	// annotations
+	mergeMaps(ing.Labels, gslb.Labels)
+	// ingress
+	gslb.Spec.Ingress.IngressClassName = ing.Spec.IngressClassName
+	gslb.Spec.Ingress.TLS = ing.Spec.TLS
+	gslb.Spec.Ingress.DefaultBackend = ing.Spec.DefaultBackend
+	gslb.Spec.Ingress.Rules = []k8gbv1beta1.IngressRule{}
+	for _, r := range ing.Spec.Rules {
+		rule := k8gbv1beta1.IngressRule{
+			Host: r.Host,
+			IngressRuleValue: k8gbv1beta1.IngressRuleValue{
+				HTTP: r.HTTP,
+			},
+		}
+		gslb.Spec.Ingress.Rules = append(gslb.Spec.Ingress.Rules, rule)
+	}
+	// todo: annotations into gslb strategy
 }
