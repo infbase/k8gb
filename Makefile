@@ -373,7 +373,7 @@ ns1-secret:
 .PHONY: lint
 lint:
 	@echo -e "\n$(YELLOW)Running the linters$(NC)"
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.50.1
 	$(GOBIN)/golangci-lint run
 
 # retrieves all targets

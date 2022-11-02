@@ -2,7 +2,6 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - deadcode
     - errcheck
     - gocritic
     - gocyclo
@@ -18,13 +17,11 @@ linters:
     - noctx
     - rowserrcheck
     - staticcheck
-    - structcheck
     - stylecheck
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
     - depguard
     - dogsled
     - exportloopref
