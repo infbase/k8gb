@@ -118,18 +118,18 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 		Name:      a.GetName(),
 	}, gslbExist)
 	if err == nil {
-		r.syncIngressToGslb(ingressToReuse, gslbExist)
-		err = r.Update(context.TODO(), ingressToReuse)
+		log.Info().
+			Str("gslb", gslbExist.Name).
+			Str("ingress", ingressToReuse.Name).
+			Msg("Syncing resources:")
+		err = r.syncIngressToGslb(ingressToReuse, gslbExist)
 		if err != nil {
-			log.Err(err).Str("ingress", a.GetName()).Msg("Updating ingress")
+			log.Err(err).Str("gslb", gslbExist.Name).Msg("Updating gslb from ingress")
 		}
 		err = r.Update(context.TODO(), gslbExist)
 		if err != nil {
-			log.Err(err).Str("ingress", a.GetName()).Msg("Updating ingress")
+			log.Err(err).Str("gslb", gslbExist.Name).Msg("Updating gslb from ingress")
 		}
-		log.Info().
-			Str("gslb", gslbExist.Name).
-			Msg("Gslb already exists. Skipping Gslb creation...")
 		return
 	}
 	gslb := &k8gbv1beta1.Gslb{
@@ -206,7 +206,7 @@ func (r *GslbReconciler) parseStrategy(annotations map[string]string, strategy s
 }
 
 // syncIngressToGslb copies the specified entries from the ingress to the GSLB
-func (r *GslbReconciler) syncIngressToGslb(ing *netv1.Ingress, gslb *k8gbv1beta1.Gslb) {
+func (r *GslbReconciler) syncIngressToGslb(ing *netv1.Ingress, gslb *k8gbv1beta1.Gslb) (err error) {
 	// todo: replace to generics when bump GO version
 	mergeMaps := func(source, destination map[string]string) {
 		const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
@@ -237,5 +237,24 @@ func (r *GslbReconciler) syncIngressToGslb(ing *netv1.Ingress, gslb *k8gbv1beta1
 		}
 		gslb.Spec.Ingress.Rules = append(gslb.Spec.Ingress.Rules, rule)
 	}
-	// todo: annotations into gslb strategy
+
+	if v, found := ing.Annotations[primaryGeoTagAnnotation]; found {
+		gslb.Spec.Strategy.PrimaryGeoTag = v
+	}
+	if v, found := ing.Annotations[strategyAnnotation]; found {
+		gslb.Spec.Strategy.Type = v
+	}
+	if v, found := ing.Annotations[dnsTTLSecondsAnnotation]; found {
+		gslb.Spec.Strategy.DNSTtlSeconds, err = strconv.Atoi(v)
+		if err != nil {
+			return err
+		}
+	}
+	if v, found := ing.Annotations[splitBrainThresholdSecondsAnnotation]; found {
+		gslb.Spec.Strategy.SplitBrainThresholdSeconds, err = strconv.Atoi(v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
