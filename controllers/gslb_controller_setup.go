@@ -28,7 +28,6 @@ import (
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,71 +94,66 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object, strategy string) {
+func (r *GslbReconciler) createGSLBFromIngress(c client.Client, upstreamInress client.Object, strategy string) {
 	log.Info().
 		Str("annotation", fmt.Sprintf("(%s:%s)", strategyAnnotation, strategy)).
-		Str("ingress", a.GetName()).
+		Str("ingress", upstreamInress.GetName()).
 		Msg("Detected strategy annotation on ingress")
 
-	ingressToReuse := &netv1.Ingress{}
-	err := c.Get(context.Background(), client.ObjectKey{
-		Namespace: a.GetNamespace(),
-		Name:      a.GetName(),
-	}, ingressToReuse)
+	var result converterResult
+	var existingIngress *netv1.Ingress
+	var gslbExist *k8gbv1beta1.Gslb
+	var err error
+	cc := newConverter(c)
+	existingIngress, _, err = cc.getIngress(upstreamInress.GetNamespace(), upstreamInress.GetName())
 	if err != nil {
-		log.Info().
-			Str("ingress", a.GetName()).
+		log.Debug().
+			Str("ingress", upstreamInress.GetName()).
 			Msg("Ingress does not exist anymore. Skipping Glsb creation...")
 		return
 	}
-	gslbExist := &k8gbv1beta1.Gslb{}
-	err = c.Get(context.Background(), client.ObjectKey{
-		Namespace: a.GetNamespace(),
-		Name:      a.GetName(),
-	}, gslbExist)
-	if err == nil {
-		log.Info().
+	gslbExist, result, err = cc.getGslb(upstreamInress.GetNamespace(), upstreamInress.GetName())
+	switch result {
+	case converterResultExists:
+		log.Debug().
 			Str("gslb", gslbExist.Name).
 			Msg("Gslb already exists. Skipping Gslb creation...")
 		return
-	}
-	gslb := &k8gbv1beta1.Gslb{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   a.GetNamespace(),
-			Name:        a.GetName(),
-			Annotations: a.GetAnnotations(),
-		},
-		Spec: k8gbv1beta1.GslbSpec{
-			Ingress: k8gbv1beta1.FromV1IngressSpec(ingressToReuse.Spec),
-		},
-	}
+	case converterResultNotExists:
+		var gslb *k8gbv1beta1.Gslb
+		gslb, _, err = cc.ingressAsGslb(existingIngress)
+		if err != nil {
+			log.Err(err).
+				Str("gslb", gslbExist.Name).
+				Str("gslb", existingIngress.Name).
+				Msg("can't parse Gslb from Ingress")
+			return
+		}
 
-	gslb.Spec.Strategy, err = r.parseStrategy(a.GetAnnotations(), strategy)
-	if err != nil {
+		err = controllerutil.SetControllerReference(existingIngress, gslb, r.Scheme)
+		if err != nil {
+			log.Err(err).
+				Str("ingress", existingIngress.Name).
+				Str("gslb", gslb.Name).
+				Msg("Cannot set the Ingress as the owner of the Gslb")
+		}
+
+		log.Info().
+			Str("gslb", gslb.Name).
+			Msg(fmt.Sprintf("Creating a new Gslb out of Ingress with '%s' annotation", strategyAnnotation))
+		err = c.Create(context.Background(), gslb)
+		if err != nil {
+			log.Err(err).Msg("Glsb creation failed")
+		}
+
+	default:
 		log.Err(err).
 			Str("gslb", gslbExist.Name).
-			Msg("can't parse Gslb strategy")
-		return
-	}
-
-	err = controllerutil.SetControllerReference(ingressToReuse, gslb, r.Scheme)
-	if err != nil {
-		log.Err(err).
-			Str("ingress", ingressToReuse.Name).
-			Str("gslb", gslb.Name).
-			Msg("Cannot set the Ingress as the owner of the Gslb")
-	}
-
-	log.Info().
-		Str("gslb", gslb.Name).
-		Msg(fmt.Sprintf("Creating a new Gslb out of Ingress with '%s' annotation", strategyAnnotation))
-	err = c.Create(context.Background(), gslb)
-	if err != nil {
-		log.Err(err).Msg("Glsb creation failed")
+			Msg("Can't load gslb object")
 	}
 }
 
-func (r *GslbReconciler) parseStrategy(annotations map[string]string, strategy string) (result k8gbv1beta1.Strategy, err error) {
+func parseStrategy(annotations map[string]string, strategy string) (result k8gbv1beta1.Strategy, err error) {
 	toInt := func(k string, v string) (int, error) {
 		intValue, err := strconv.Atoi(v)
 		if err != nil {
