@@ -78,9 +78,10 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
 			annotations := a.GetAnnotations()
-			if annotationValue, found := annotations[strategyAnnotation]; found {
+			if _, found := annotations[strategyAnnotation]; found {
+				var upstreamIngress = a.(*netv1.Ingress)
 				c := mgr.GetClient()
-				r.createGSLBFromIngress(c, a, annotationValue)
+				r.syncGSLBFromIngress(c, upstreamIngress)
 			}
 			return nil
 		})
@@ -94,46 +95,35 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *GslbReconciler) createGSLBFromIngress(c client.Client, upstreamInress client.Object, strategy string) {
+func (r *GslbReconciler) syncGSLBFromIngress(c client.Client, upstreamIngress *netv1.Ingress) {
 	log.Info().
-		Str("annotation", fmt.Sprintf("(%s:%s)", strategyAnnotation, strategy)).
-		Str("ingress", upstreamInress.GetName()).
+		Str("annotation", fmt.Sprintf("(%s:%s)", strategyAnnotation, upstreamIngress.Annotations[strategyAnnotation])).
+		Str("ingress", upstreamIngress.Name).
 		Msg("Detected strategy annotation on ingress")
-
-	var result converterResult
-	var existingIngress *netv1.Ingress
-	var gslbExist *k8gbv1beta1.Gslb
-	var err error
 	cc := newConverter(c)
-	existingIngress, _, err = cc.getIngress(upstreamInress.GetNamespace(), upstreamInress.GetName())
-	if err != nil {
-		log.Debug().
-			Str("ingress", upstreamInress.GetName()).
-			Msg("Ingress does not exist anymore. Skipping Glsb creation...")
-		return
-	}
-	gslbExist, result, err = cc.getGslb(upstreamInress.GetNamespace(), upstreamInress.GetName())
+	_, result, err := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
 	switch result {
 	case converterResultExists:
 		log.Debug().
-			Str("gslb", gslbExist.Name).
+			Str("gslb", upstreamIngress.Name).
 			Msg("Gslb already exists. Skipping Gslb creation...")
 		return
 	case converterResultNotExists:
+		if _, cr, _ := cc.getIngress(upstreamIngress.Namespace, upstreamIngress.Name); cr != converterResultExists {
+			break
+		}
 		var gslb *k8gbv1beta1.Gslb
-		gslb, _, err = cc.ingressAsGslb(existingIngress)
+		gslb, _, err = cc.ingressAsGslb(upstreamIngress)
 		if err != nil {
 			log.Err(err).
-				Str("gslb", gslbExist.Name).
-				Str("gslb", existingIngress.Name).
+				Str("ingress", upstreamIngress.Name).
 				Msg("can't parse Gslb from Ingress")
 			return
 		}
-
-		err = controllerutil.SetControllerReference(existingIngress, gslb, r.Scheme)
+		err = controllerutil.SetControllerReference(upstreamIngress, gslb, r.Scheme)
 		if err != nil {
 			log.Err(err).
-				Str("ingress", existingIngress.Name).
+				Str("ingress", upstreamIngress.Name).
 				Str("gslb", gslb.Name).
 				Msg("Cannot set the Ingress as the owner of the Gslb")
 		}
@@ -148,7 +138,7 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, upstreamInress c
 
 	default:
 		log.Err(err).
-			Str("gslb", gslbExist.Name).
+			Str("gslb", upstreamIngress.Name).
 			Msg("Can't load gslb object")
 	}
 }
