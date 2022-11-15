@@ -24,6 +24,7 @@ import (
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -93,6 +94,26 @@ func (c *converter) ingressAsGslb(ingress *netv1.Ingress) (gslb *k8gbv1beta1.Gsl
 	gslb.Spec.Ingress = k8gbv1beta1.FromV1IngressSpec(ingress.Spec)
 	gslb.Spec.Strategy, err = parseStrategy(ingress.Annotations, strategy)
 	return gslb, r, err
+}
+
+func (c *converter) equal(ingress *netv1.Ingress, gslb *k8gbv1beta1.Gslb) bool {
+	if ingress == nil || gslb == nil {
+		return false
+	}
+	// strategy
+	ingressStrategy, err := parseStrategy(ingress.Annotations, ingress.Annotations[strategyAnnotation])
+	if err != nil {
+		return false
+	}
+	if !reflect.DeepEqual(ingressStrategy, gslb.Spec.Strategy) {
+		return false
+	}
+	// ingress
+	ingressSpec := k8gbv1beta1.FromV1IngressSpec(ingress.Spec)
+	if !reflect.DeepEqual(ingressSpec, gslb.Spec.Ingress) {
+		return false
+	}
+	return true
 }
 
 func (c *converter) getConverterResult(err error) (converterResult, error) {

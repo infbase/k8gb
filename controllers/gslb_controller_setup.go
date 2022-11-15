@@ -75,6 +75,18 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return nil
 		})
 
+	gslbMapHandler := handler.EnqueueRequestsFromMapFunc(
+		func(a client.Object) []reconcile.Request {
+			var upstreamGslb = a.(*k8gbv1beta1.Gslb)
+			c := mgr.GetClient()
+			cc := newConverter(c)
+			ing, _, _ := cc.getIngress(upstreamGslb.Namespace, upstreamGslb.Name)
+			if !cc.equal(ing, upstreamGslb) {
+				r.syncIngressFromGslb(c, upstreamGslb)
+			}
+			return nil
+		})
+
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
 			annotations := a.GetAnnotations()
@@ -92,7 +104,26 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&externaldns.DNSEndpoint{}).
 		Watches(&source.Kind{Type: &corev1.Endpoints{}}, endpointMapHandler).
 		Watches(&source.Kind{Type: &netv1.Ingress{}}, ingressMapHandler).
+		Watches(&source.Kind{Type: &k8gbv1beta1.Gslb{}}, gslbMapHandler).
 		Complete(r)
+}
+
+func (r *GslbReconciler) syncIngressFromGslb(c client.Client, upstreamGslb *k8gbv1beta1.Gslb) {
+	cc := newConverter(c)
+	_, result, err := cc.getGslb(upstreamGslb.Namespace, upstreamGslb.Name)
+	switch result {
+	case converterResultExists:
+		log.Debug().
+			Str("gslb", upstreamGslb.Name).
+			Msg("Gslb already exists. Skipping Gslb creation...")
+		return
+	case converterResultNotExists:
+		log.Debug().Str("gslb", upstreamGslb.Name).Msg("updating GSLB")
+	default:
+		log.Err(err).
+			Str("gslb", upstreamGslb.Name).
+			Msg("Can't load gslb object")
+	}
 }
 
 func (r *GslbReconciler) syncGSLBFromIngress(c client.Client, upstreamIngress *netv1.Ingress) {

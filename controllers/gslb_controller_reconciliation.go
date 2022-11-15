@@ -137,17 +137,17 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// == Ingress ==========
-	ingress, err := r.gslbIngress(gslb)
-	if err != nil {
-		m.IncrementError(gslb)
-		return result.RequeueError(err)
-	}
-
-	err = r.saveIngress(gslb, ingress)
-	if err != nil {
-		m.IncrementError(gslb)
-		return result.RequeueError(err)
-	}
+	//ingress, err := r.gslbIngress(gslb)
+	//if err != nil {
+	//	m.IncrementError(gslb)
+	//	return result.RequeueError(err)
+	//}
+	//
+	//err = r.saveIngress(gslb, ingress)
+	//if err != nil {
+	//	m.IncrementError(gslb)
+	//	return result.RequeueError(err)
+	//}
 
 	// == external-dns dnsendpoints CRs ==
 	dnsEndpoint, err := r.gslbDNSEndpoint(gslb)
