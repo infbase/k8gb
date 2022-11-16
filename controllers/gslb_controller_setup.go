@@ -174,8 +174,6 @@ func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingres
 		Str("ingress", upstreamIngress.Name).
 		Msg("Detected strategy annotation on ingress")
 
-	if
-
 	cc := newMapper(c)
 	var gslb *k8gbv1beta1.Gslb
 	gslb, result, err := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
@@ -214,13 +212,13 @@ func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingres
 				Msg("can't parse Gslb from Ingress")
 			return
 		}
-		err = r.DepResolver.ResolveGslbSpec(context.TODO(), gslb, c)
-		if err != nil {
-			log.Err(err).
-				Str("ingress", upstreamIngress.Name).
-				Msg("can't parse Gslb from Ingress")
-			return
-		}
+		//err = r.DepResolver.ResolveGslbSpec(context.TODO(), gslb, c)
+		//if err != nil {
+		//	log.Err(err).
+		//		Str("ingress", upstreamIngress.Name).
+		//		Msg("can't parse Gslb from Ingress")
+		//	return
+		//}
 		err = controllerutil.SetControllerReference(upstreamIngress, gslb, r.Scheme)
 		if err != nil {
 			log.Err(err).
@@ -243,7 +241,7 @@ func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingres
 	}
 }
 
-func parseStrategy(annotations map[string]string, strategy string) (result k8gbv1beta1.Strategy, err error) {
+func parseStrategy(annotations map[string]string) (result k8gbv1beta1.Strategy, err error) {
 	toInt := func(k string, v string) (int, error) {
 		intValue, err := strconv.Atoi(v)
 		if err != nil {
@@ -253,25 +251,41 @@ func parseStrategy(annotations map[string]string, strategy string) (result k8gbv
 	}
 
 	result = k8gbv1beta1.Strategy{
-		Type: strategy,
+		Type: "",
+		PrimaryGeoTag: "",
+		DNSTtlSeconds: 30,
+		SplitBrainThresholdSeconds: 300,
+
+	}
+	cmap := make(map[string]string, 0)
+	for _, k := range []string{strategyAnnotation, dnsTTLSecondsAnnotation, splitBrainThresholdSecondsAnnotation, primaryGeoTagAnnotation} {
+		cmap[k] :=
 	}
 
-	for annotationKey, annotationValue := range annotations {
-		switch annotationKey {
+	for key, value := range annotations {
+		switch key {
+		case strategyAnnotation:
+			result.Type = value
 		case dnsTTLSecondsAnnotation:
-			if result.DNSTtlSeconds, err = toInt(annotationKey, annotationValue); err != nil {
-				return result, err
+			if result.DNSTtlSeconds, err = toInt(key, value); err != nil {
+				if result.DNSTtlSeconds == 0 {
+					result.DNSTtlSeconds = 30
+				}
+				return result, nil
 			}
 		case splitBrainThresholdSecondsAnnotation:
-			if result.SplitBrainThresholdSeconds, err = toInt(annotationKey, annotationValue); err != nil {
+			if result.SplitBrainThresholdSeconds, err = toInt(key, value); err != nil {
+				if result.SplitBrainThresholdSeconds == 0 {
+					result.SplitBrainThresholdSeconds = 300
+				}
 				return result, err
 			}
 		case primaryGeoTagAnnotation:
-			result.PrimaryGeoTag = annotationValue
+			result.PrimaryGeoTag = value
 		}
 	}
 
-	if strategy == depresolver.FailoverStrategy {
+	if result.Type == depresolver.FailoverStrategy {
 		if len(result.PrimaryGeoTag) == 0 {
 			return result, fmt.Errorf("%s strategy requires annotation %s", depresolver.FailoverStrategy, primaryGeoTagAnnotation)
 		}

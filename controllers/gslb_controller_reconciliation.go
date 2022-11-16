@@ -82,11 +82,6 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return result.RequeueError(fmt.Errorf("error reading the object (%s)", err))
 	}
 
-	//err = r.DepResolver.ResolveGslbSpec(ctx, gslb, r.Client)
-	//if err != nil {
-	//	m.IncrementError(gslb)
-	//	return result.RequeueError(fmt.Errorf("resolving spec (%s)", err))
-	//}
 	log.Debug().
 		Str("gslb", gslb.Name).
 		Interface("strategy", gslb.Spec.Strategy).
@@ -135,19 +130,6 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return result.RequeueError(err)
 		}
 	}
-
-	// == Ingress ==========
-	//ingress, err := r.gslbIngress(gslb)
-	//if err != nil {
-	//	m.IncrementError(gslb)
-	//	return result.RequeueError(err)
-	//}
-	//
-	//err = r.saveIngress(gslb, ingress)
-	//if err != nil {
-	//	m.IncrementError(gslb)
-	//	return result.RequeueError(err)
-	//}
 
 	// == external-dns dnsendpoints CRs ==
 	dnsEndpoint, err := r.gslbDNSEndpoint(gslb)
