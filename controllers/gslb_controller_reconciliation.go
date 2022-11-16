@@ -82,11 +82,11 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return result.RequeueError(fmt.Errorf("error reading the object (%s)", err))
 	}
 
-	err = r.DepResolver.ResolveGslbSpec(ctx, gslb, r.Client)
-	if err != nil {
-		m.IncrementError(gslb)
-		return result.RequeueError(fmt.Errorf("resolving spec (%s)", err))
-	}
+	//err = r.DepResolver.ResolveGslbSpec(ctx, gslb, r.Client)
+	//if err != nil {
+	//	m.IncrementError(gslb)
+	//	return result.RequeueError(fmt.Errorf("resolving spec (%s)", err))
+	//}
 	log.Debug().
 		Str("gslb", gslb.Name).
 		Interface("strategy", gslb.Spec.Strategy).

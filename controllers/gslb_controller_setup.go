@@ -79,10 +79,10 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		func(a client.Object) []reconcile.Request {
 			var upstreamGslb = a.(*k8gbv1beta1.Gslb)
 			c := mgr.GetClient()
-			cc := newConverter(c)
+			cc := newMapper(c)
 			ing, _, _ := cc.getIngress(upstreamGslb.Namespace, upstreamGslb.Name)
 			if !cc.equal(ing, upstreamGslb) {
-				r.syncIngressFromGslb(c, upstreamGslb)
+				r.syncIngress(c, upstreamGslb)
 			}
 			return nil
 		})
@@ -93,7 +93,11 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if _, found := annotations[strategyAnnotation]; found {
 				var upstreamIngress = a.(*netv1.Ingress)
 				c := mgr.GetClient()
-				r.syncGSLBFromIngress(c, upstreamIngress)
+				cc := newMapper(c)
+				gslb, _, _ := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
+				if !cc.equal(upstreamIngress, gslb) {
+					r.syncGslb(c, upstreamIngress)
+				}
 			}
 			return nil
 		})
@@ -108,17 +112,55 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *GslbReconciler) syncIngressFromGslb(c client.Client, upstreamGslb *k8gbv1beta1.Gslb) {
-	cc := newConverter(c)
+func (r *GslbReconciler) syncIngress(c client.Client, upstreamGslb *k8gbv1beta1.Gslb) {
+	cc := newMapper(c)
 	_, result, err := cc.getGslb(upstreamGslb.Namespace, upstreamGslb.Name)
 	switch result {
-	case converterResultExists:
-		log.Debug().
-			Str("gslb", upstreamGslb.Name).
-			Msg("Gslb already exists. Skipping Gslb creation...")
+	case mapperResultUpdate:
+		var ingress *netv1.Ingress
+		ingress, _, err = cc.getIngress(upstreamGslb.Namespace, upstreamGslb.Name)
+		if err != nil {
+			log.Err(err).
+				Str("ingress", upstreamGslb.Name).
+				Msg("can't load Ingress")
+		}
+		if !cc.equal(ingress, upstreamGslb) {
+			log.Debug().
+				Str("ingress", ingress.Name).
+				Msg("Updating Ingress from Gslb")
+			ingress, _, err = cc.mapGslbAsIngress(upstreamGslb)
+			if err != nil {
+				log.Err(err).
+					Str("gslb", ingress.Name).
+					Msg("can't update Ingress from Gslb")
+				return
+			}
+			err = c.Update(context.TODO(), ingress)
+			if err != nil {
+				log.Err(err).
+					Str("gslb", ingress.Name).
+					Msg("can't update Ingress from Gslb")
+				return
+			}
+		}
 		return
-	case converterResultNotExists:
+	case mapperResultCreate:
+		var ingress *netv1.Ingress
 		log.Debug().Str("gslb", upstreamGslb.Name).Msg("updating GSLB")
+		ingress, _, err = cc.mapGslbAsIngress(upstreamGslb)
+		if err != nil {
+			log.Err(err).
+				Str("gslb", upstreamGslb.Name).
+				Msg("can't parse Gslb from Ingress")
+			return
+		}
+		log.Info().
+			Str("ingress", ingress.Name).
+			Msg(fmt.Sprintf("Creating a new Ingress out of Gslb with '%s' annotation", strategyAnnotation))
+		err = c.Create(context.Background(), ingress)
+		if err != nil {
+			log.Err(err).Msg("Ingress creation failed")
+		}
 	default:
 		log.Err(err).
 			Str("gslb", upstreamGslb.Name).
@@ -126,25 +168,53 @@ func (r *GslbReconciler) syncIngressFromGslb(c client.Client, upstreamGslb *k8gb
 	}
 }
 
-func (r *GslbReconciler) syncGSLBFromIngress(c client.Client, upstreamIngress *netv1.Ingress) {
+func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingress) {
 	log.Info().
 		Str("annotation", fmt.Sprintf("(%s:%s)", strategyAnnotation, upstreamIngress.Annotations[strategyAnnotation])).
 		Str("ingress", upstreamIngress.Name).
 		Msg("Detected strategy annotation on ingress")
-	cc := newConverter(c)
-	_, result, err := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
+
+	if
+
+	cc := newMapper(c)
+	var gslb *k8gbv1beta1.Gslb
+	gslb, result, err := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
+	if err != nil {
+		log.Err(err).
+			Str("ingress", upstreamIngress.Name).
+			Msg("can't load Gslb")
+	}
 	switch result {
-	case converterResultExists:
-		log.Debug().
-			Str("gslb", upstreamIngress.Name).
-			Msg("Gslb already exists. Skipping Gslb creation...")
-		return
-	case converterResultNotExists:
-		if _, cr, _ := cc.getIngress(upstreamIngress.Namespace, upstreamIngress.Name); cr != converterResultExists {
-			break
+	case mapperResultUpdate:
+		if !cc.equal(upstreamIngress, gslb) {
+			log.Debug().
+				Str("gslb", gslb.Name).
+				Msg("Updating Gslb from ingress")
+			gslb, _, err = cc.mapIngressAsGslb(upstreamIngress)
+			if err != nil {
+				log.Err(err).
+					Str("gslb", gslb.Name).
+					Msg("can't update Gslb from Ingress")
+				return
+			}
+			err = c.Update(context.TODO(), gslb)
+			if err != nil {
+				log.Err(err).
+					Str("gslb", gslb.Name).
+					Msg("can't update Gslb from Ingress")
+				return
+			}
 		}
-		var gslb *k8gbv1beta1.Gslb
-		gslb, _, err = cc.ingressAsGslb(upstreamIngress)
+		return
+	case mapperResultCreate:
+		gslb, _, err = cc.mapIngressAsGslb(upstreamIngress)
+		if err != nil {
+			log.Err(err).
+				Str("ingress", upstreamIngress.Name).
+				Msg("can't parse Gslb from Ingress")
+			return
+		}
+		err = r.DepResolver.ResolveGslbSpec(context.TODO(), gslb, c)
 		if err != nil {
 			log.Err(err).
 				Str("ingress", upstreamIngress.Name).
@@ -158,7 +228,6 @@ func (r *GslbReconciler) syncGSLBFromIngress(c client.Client, upstreamIngress *n
 				Str("gslb", gslb.Name).
 				Msg("Cannot set the Ingress as the owner of the Gslb")
 		}
-
 		log.Info().
 			Str("gslb", gslb.Name).
 			Msg(fmt.Sprintf("Creating a new Gslb out of Ingress with '%s' annotation", strategyAnnotation))
@@ -207,6 +276,5 @@ func parseStrategy(annotations map[string]string, strategy string) (result k8gbv
 			return result, fmt.Errorf("%s strategy requires annotation %s", depresolver.FailoverStrategy, primaryGeoTagAnnotation)
 		}
 	}
-
 	return result, nil
 }

@@ -26,62 +26,74 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"strconv"
 )
 
 // Converts between ingress and gslb.
-type converter struct {
+type mapper struct {
 	client.Client
 }
 
-type converterResult int
+type mapperResult int
 
 const (
-	converterResultExists converterResult = iota
-	converterResultNotExists
-	converterResultError
+	mapperResultUpdate mapperResult = iota
+	mapperResultCreate
+	mapperResultError
 )
 
-func newConverter(c client.Client) *converter {
-	return &converter{Client: c}
+func newMapper(c client.Client) *mapper {
+	return &mapper{Client: c}
 }
 
-func (c *converter) getGslb(namespace, name string) (gslb *k8gbv1beta1.Gslb, r converterResult, err error) {
+func (m *mapper) getGslb(namespace, name string) (gslb *k8gbv1beta1.Gslb, r mapperResult, err error) {
 	gslb = &k8gbv1beta1.Gslb{}
-	err = c.Get(context.TODO(), client.ObjectKey{
+	err = m.Get(context.TODO(), client.ObjectKey{
 		Namespace: namespace,
 		Name:      name,
 	}, gslb)
-	r, err = c.getConverterResult(err)
+	r, err = m.getConverterResult(err)
 	return gslb, r, err
 }
 
-func (c *converter) getIngress(namespace, name string) (ingress *netv1.Ingress, r converterResult, err error) {
+func (m *mapper) getIngress(namespace, name string) (ingress *netv1.Ingress, r mapperResult, err error) {
 	ingress = &netv1.Ingress{}
-	err = c.Get(context.TODO(), client.ObjectKey{
+	err = m.Get(context.TODO(), client.ObjectKey{
 		Namespace: namespace,
 		Name:      name,
 	}, ingress)
-	r, err = c.getConverterResult(err)
+	r, err = m.getConverterResult(err)
 	return ingress, r, err
 }
 
-//  func (c *converter) gslbAsIngress(gslb *k8gbv1beta1.Gslb) (ingress *netv1.Ingress, r converterResult, err error) {
-//	ingress, r, err = c.getIngress(gslb.Namespace, gslb.Name)
-//  ingress.Namespace =  gslb.Namespace
-//  ingress.Name = gslb.Name
-//	if err != nil {
-//		return ingress, r, err
-//	}
-//	ingress.Spec = k8gbv1beta1.ToV1IngressSpec(gslb.Spec.Ingress)
-//	ingress.Annotations[dnsTTLSecondsAnnotation] = strconv.Itoa(gslb.Spec.Strategy.DNSTtlSeconds)
-//	ingress.Annotations[splitBrainThresholdSecondsAnnotation] = strconv.Itoa(gslb.Spec.Strategy.SplitBrainThresholdSeconds)
-//	ingress.Annotations[primaryGeoTagAnnotation] = gslb.Spec.Strategy.PrimaryGeoTag
-//	ingress.Annotations[strategyAnnotation] = gslb.Spec.Strategy.Type
-//	return ingress, r, err
-//  }
+func (c *mapper) mapGslbAsIngress(gslb *k8gbv1beta1.Gslb) (ingress *netv1.Ingress, r mapperResult, err error) {
+	ingress, r, err = c.getIngress(gslb.Namespace, gslb.Name)
+	if err != nil {
+		return ingress, r, err
+	}
+	// in case ingress doesn't exist
+	ingress.Namespace = gslb.Namespace
+	ingress.Name = gslb.Name
 
-func (c *converter) ingressAsGslb(ingress *netv1.Ingress) (gslb *k8gbv1beta1.Gslb, r converterResult, err error) {
-	gslb, r, err = c.getGslb(ingress.Namespace, ingress.Name)
+	ingress.Spec = k8gbv1beta1.ToV1IngressSpec(gslb.Spec.Ingress)
+	ingress.Annotations[dnsTTLSecondsAnnotation] = strconv.Itoa(gslb.Spec.Strategy.DNSTtlSeconds)
+	ingress.Annotations[splitBrainThresholdSecondsAnnotation] = strconv.Itoa(gslb.Spec.Strategy.SplitBrainThresholdSeconds)
+	ingress.Annotations[primaryGeoTagAnnotation] = gslb.Spec.Strategy.PrimaryGeoTag
+	ingress.Annotations[strategyAnnotation] = gslb.Spec.Strategy.Type
+	return ingress, r, err
+}
+
+func (m *mapper) setDefaultAnnotations(ingress *netv1.Ingress, strategy k8gbv1beta1.Strategy) bool {
+	ingress.Annotations[dnsTTLSecondsAnnotation] = strconv.Itoa(strategy.DNSTtlSeconds)
+	ingress.Annotations[splitBrainThresholdSecondsAnnotation] = strconv.Itoa(strategy.SplitBrainThresholdSeconds)
+	ingress.Annotations[primaryGeoTagAnnotation] = strategy.PrimaryGeoTag
+	ingress.Annotations[strategyAnnotation] = strategy.Type
+	return false
+
+}
+
+func (m *mapper) mapIngressAsGslb(ingress *netv1.Ingress) (gslb *k8gbv1beta1.Gslb, r mapperResult, err error) {
+	gslb, r, err = m.getGslb(ingress.Namespace, ingress.Name)
 	if err != nil {
 		return gslb, r, err
 	}
@@ -96,7 +108,7 @@ func (c *converter) ingressAsGslb(ingress *netv1.Ingress) (gslb *k8gbv1beta1.Gsl
 	return gslb, r, err
 }
 
-func (c *converter) equal(ingress *netv1.Ingress, gslb *k8gbv1beta1.Gslb) bool {
+func (m *mapper) equal(ingress *netv1.Ingress, gslb *k8gbv1beta1.Gslb) bool {
 	if ingress == nil || gslb == nil {
 		return false
 	}
@@ -116,11 +128,11 @@ func (c *converter) equal(ingress *netv1.Ingress, gslb *k8gbv1beta1.Gslb) bool {
 	return true
 }
 
-func (c *converter) getConverterResult(err error) (converterResult, error) {
+func (m *mapper) getConverterResult(err error) (mapperResult, error) {
 	if err != nil && errors.IsNotFound(err) {
-		return converterResultNotExists, nil
+		return mapperResultCreate, nil
 	} else if err != nil {
-		return converterResultError, err
+		return mapperResultError, err
 	}
-	return converterResultExists, nil
+	return mapperResultUpdate, nil
 }
