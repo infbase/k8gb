@@ -117,6 +117,9 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *GslbReconciler) syncIngress(c client.Client, upstreamGslb *k8gbv1beta1.Gslb) {
+	log.Info().
+		Str("Gslb", upstreamGslb.Name).
+		Msg("Sync Ingress from Gslb")
 	cc := newMapper(c)
 	_, result, err := cc.getGslb(upstreamGslb.Namespace, upstreamGslb.Name)
 	switch result {
@@ -150,7 +153,9 @@ func (r *GslbReconciler) syncIngress(c client.Client, upstreamGslb *k8gbv1beta1.
 		return
 	case mapperResultCreate:
 		var ingress *netv1.Ingress
-		log.Debug().Str("gslb", upstreamGslb.Name).Msg("updating GSLB")
+		log.Debug().
+			Str("ingress", upstreamGslb.Name).
+			Msg("Creating Ingress from Gslb")
 		ingress, _, err = cc.mapGslbAsIngress(upstreamGslb)
 		if err != nil {
 			log.Err(err).
@@ -176,7 +181,7 @@ func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingres
 	log.Info().
 		Str("annotation", fmt.Sprintf("(%s:%s)", strategyAnnotation, upstreamIngress.Annotations[strategyAnnotation])).
 		Str("ingress", upstreamIngress.Name).
-		Msg("Detected strategy annotation on ingress")
+		Msg("Sync Gslb from Ingress")
 
 	cc := newMapper(c)
 	var gslb *k8gbv1beta1.Gslb
@@ -216,13 +221,6 @@ func (r *GslbReconciler) syncGslb(c client.Client, upstreamIngress *netv1.Ingres
 				Msg("can't parse Gslb from Ingress")
 			return
 		}
-		//err = r.DepResolver.ResolveGslbSpec(context.TODO(), gslb, c)
-		//if err != nil {
-		//	log.Err(err).
-		//		Str("ingress", upstreamIngress.Name).
-		//		Msg("can't parse Gslb from Ingress")
-		//	return
-		//}
 		err = controllerutil.SetControllerReference(upstreamIngress, gslb, r.Scheme)
 		if err != nil {
 			log.Err(err).
