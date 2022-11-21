@@ -162,7 +162,6 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		m.IncrementError(gslb)
 		return result.RequeueError(err)
 	}
-
 	// == Finish ==========
 	// Everything went fine, requeue after some time to catch up
 	// with external Gslb status

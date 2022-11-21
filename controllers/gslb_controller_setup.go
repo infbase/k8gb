@@ -77,13 +77,15 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	gslbMapHandler := handler.EnqueueRequestsFromMapFunc(
 		func(a client.Object) []reconcile.Request {
-			var upstreamGslb = a.(*k8gbv1beta1.Gslb)
+			var gslb = a.(*k8gbv1beta1.Gslb)
 			c := mgr.GetClient()
 			cc := newMapper(c)
-			ing, _, _ := cc.getIngress(upstreamGslb.Namespace, upstreamGslb.Name)
-			if !cc.equal(ing, upstreamGslb) {
-				r.syncIngress(c, upstreamGslb)
+			ing, _, _ := cc.getIngress(gslb.Namespace, gslb.Name)
+			if cc.equal(ing, gslb) {
+				return nil
 			}
+			gslb = cc.getNewestGslb(gslb)
+			r.syncIngress(c, gslb)
 			return nil
 		})
 
@@ -91,13 +93,15 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		func(a client.Object) []reconcile.Request {
 			annotations := a.GetAnnotations()
 			if _, found := annotations[strategyAnnotation]; found {
-				var upstreamIngress = a.(*netv1.Ingress)
+				var ing = a.(*netv1.Ingress)
 				c := mgr.GetClient()
 				cc := newMapper(c)
-				gslb, _, _ := cc.getGslb(upstreamIngress.Namespace, upstreamIngress.Name)
-				if !cc.equal(upstreamIngress, gslb) {
-					r.syncGslb(c, upstreamIngress)
+				gslb, _, _ := cc.getGslb(ing.Namespace, ing.Name)
+				if cc.equal(ing, gslb) {
+					return nil
 				}
+				ing = cc.getNewestIngress(ing)
+				r.syncGslb(c, ing)
 			}
 			return nil
 		})
@@ -251,39 +255,29 @@ func parseStrategy(annotations map[string]string) (result k8gbv1beta1.Strategy, 
 	}
 
 	result = k8gbv1beta1.Strategy{
-		Type: "",
-		PrimaryGeoTag: "",
-		DNSTtlSeconds: 30,
+		Type:                       "",
+		PrimaryGeoTag:              "",
+		DNSTtlSeconds:              30,
 		SplitBrainThresholdSeconds: 300,
-
+		Weight:                     nil,
 	}
-	cmap := make(map[string]string, 0)
-	for _, k := range []string{strategyAnnotation, dnsTTLSecondsAnnotation, splitBrainThresholdSecondsAnnotation, primaryGeoTagAnnotation} {
-		cmap[k] :=
+	if value, found := annotations[strategyAnnotation]; found {
+		result.Type = value
 	}
-
-	for key, value := range annotations {
-		switch key {
-		case strategyAnnotation:
-			result.Type = value
-		case dnsTTLSecondsAnnotation:
-			if result.DNSTtlSeconds, err = toInt(key, value); err != nil {
-				if result.DNSTtlSeconds == 0 {
-					result.DNSTtlSeconds = 30
-				}
-				return result, nil
-			}
-		case splitBrainThresholdSecondsAnnotation:
-			if result.SplitBrainThresholdSeconds, err = toInt(key, value); err != nil {
-				if result.SplitBrainThresholdSeconds == 0 {
-					result.SplitBrainThresholdSeconds = 300
-				}
-				return result, err
-			}
-		case primaryGeoTagAnnotation:
-			result.PrimaryGeoTag = value
+	if value, found := annotations[primaryGeoTagAnnotation]; found {
+		result.PrimaryGeoTag = value
+	}
+	if value, found := annotations[splitBrainThresholdSecondsAnnotation]; found {
+		if result.SplitBrainThresholdSeconds, err = toInt(splitBrainThresholdSecondsAnnotation, value); err != nil {
+			return result, err
 		}
 	}
+	if value, found := annotations[dnsTTLSecondsAnnotation]; found {
+		if result.DNSTtlSeconds, err = toInt(dnsTTLSecondsAnnotation, value); err != nil {
+			return result, err
+		}
+	}
+	// TODO: weights
 
 	if result.Type == depresolver.FailoverStrategy {
 		if len(result.PrimaryGeoTag) == 0 {

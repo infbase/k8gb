@@ -123,6 +123,29 @@ func (m *mapper) equal(ingress *netv1.Ingress, gslb *k8gbv1beta1.Gslb) bool {
 	return true
 }
 
+func (m *mapper) getNewestGslb(gslb *k8gbv1beta1.Gslb) *k8gbv1beta1.Gslb {
+	upstreamGslb, r, _ := m.getGslb(gslb.Namespace, gslb.Name)
+	if r != mapperResultUpdate {
+		return gslb
+	}
+	if gslb.CreationTimestamp.After(upstreamGslb.CreationTimestamp.Time) {
+		return gslb
+	}
+	return upstreamGslb
+}
+
+// todo: check if you can refactor by reading general object.
+func (m *mapper) getNewestIngress(ing *netv1.Ingress) *netv1.Ingress {
+	upstreamIngress, r, _ := m.getIngress(ing.Namespace, ing.Name)
+	if r != mapperResultUpdate {
+		return ing
+	}
+	if ing.CreationTimestamp.After(upstreamIngress.CreationTimestamp.Time) {
+		return ing
+	}
+	return upstreamIngress
+}
+
 func (m *mapper) getConverterResult(err error) (mapperResult, error) {
 	if err != nil && errors.IsNotFound(err) {
 		return mapperResultCreate, nil
