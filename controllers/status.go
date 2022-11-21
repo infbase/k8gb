@@ -53,8 +53,7 @@ func (r *GslbReconciler) updateGslbStatus(gslb *k8gbv1beta1.Gslb, ep *externaldn
 
 	m.UpdateEndpointStatus(ep)
 
-	err = r.Status().Update(context.TODO(), gslb)
-	return err
+	return newMapper(r.Client).updateGslbStatus(gslb)
 }
 
 func (r *GslbReconciler) getServiceHealthStatus(gslb *k8gbv1beta1.Gslb) (map[string]k8gbv1beta1.HealthStatus, error) {
